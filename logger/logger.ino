@@ -7,13 +7,15 @@
  * - set a recording date
  * - all preferences read from SD at boot time
  * 
+ * 6.1 update: added float values for volume input
+ * 
  * TODO: make debug prints cleaner through #define debug
  * 
  * Many optimizations are possible, such as using more bitmask and refining
  * some processes, but it's already good enough for the resources available
  * on a Arduino Nano Every, ATMEGA328.
  * 
- * Last update: 11/2021
+ * Last update: 01/2022
  * Author: Antonio Casoli
  */
 
@@ -60,9 +62,9 @@ RTC_DS3231 rtc;
 bool debug = true;
 */
 
-int volumeUnit[CHANNELS] = {-1,-1,-1};
+double volumeUnit[CHANNELS] = {-1,-1,-1};
 #define timeUnit 1000
-unsigned long volume[CHANNELS] = {0};
+double volume[CHANNELS] = {0};
 float t0;
 float t1;
 float flow[CHANNELS] = {0};
@@ -172,6 +174,20 @@ void setDefaults(){
     refreshRate[i] = 2;
   }
 }*/
+/*
+ * Utility function for comma support in float numbers
+ * or anything else requiring substitution
+ */
+/*
+char* replace_char(char* str, char find, char replace){
+    char *current_pos = strchr(str,find);
+    while (current_pos) {
+        *current_pos = replace;
+        current_pos = strchr(current_pos,find);
+    }
+    return str;
+}
+*/
 
 /*
  * Main function for parsing the pref file
@@ -197,7 +213,7 @@ void parseSettings(){
       
     }else if(strncmp(strBuffer,"Unità volume", 12) == 0){
       i = atoi(&strBuffer[13]);
-      volumeUnit[i-1] = atoi(&strBuffer[17]);
+      volumeUnit[i-1] = atof(&strBuffer[17]);
       
       short j = 17;
       while(strBuffer[j] != ' '){
@@ -394,17 +410,6 @@ void setRecording(){
 
     recording = !recording;
     record(recording);
-    //TODO: Delete old code managed by record func.
-//    recording = !recording;
-//    digitalWrite(LEDPIN, recording);
-//    digitalWrite(LED_BUILTIN, recording);
-//    Serial.println(recording ? "Recording: ON" : "Recording: OFF");
-//    t0 =(float) millis()/timeUnit;
-//    for (short i = 0; i < CHANNELS; i++) {
-//      volume[i] = 0;
-//      flow[i] = 0;
-//      avgFlow[i] = 0;      
-//    }
   }
 }
 
@@ -451,7 +456,7 @@ void digitalLogFlowRate(int source){
         DateTime time = rtc.now();
         sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
         sprintf(strBuffer, time.toString(strBuffer));
-        sprintf(strBuffer, "%s, %lu, %.02f, .02f",strBuffer, volume[ind], flow[ind], avgFlow[ind]);
+        sprintf(strBuffer, "%s, %.02f, %.02f, .02f",strBuffer, volume[ind], flow[ind], avgFlow[ind]);
         Serial.println(strBuffer);
         fileBuf.println(strBuffer);
       }
@@ -558,12 +563,6 @@ void refreshDisplay(){
 
 void recordOnDate(){
   record(true);
-  //TODO: Delete old code managed by record func.
-//  recording = true;
-//  digitalWrite(LEDPIN, recording);
-//  digitalWrite(LED_BUILTIN, recording);
-//  Serial.println(recording ? "Recording: ON" : "Recording: OFF");
-//  t0 =(float) millis()/timeUnit;
   if(rtc.alarmFired(1)) {
     rtc.clearAlarm(1);
     Serial.println("Alarm cleared");
