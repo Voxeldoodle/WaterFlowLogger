@@ -41,7 +41,7 @@ RTC_DS3231 rtc;
 #define SETPIN 3
 #define SDPIN 4 //Chip Select
 #define ALARMPIN 5 //SQW from RTC
-//Beware to change the IMPIN order as IMPIN1 is used as reference in the logging function
+//Beware to change the IMpPIN order as IMPpIN1 is used as reference in the digitalLogFlowRate function
 #define IMPPIN1 10
 #define IMPPIN2 9
 #define IMPPIN3 8
@@ -303,7 +303,7 @@ void writeHeaders(){
         sprintf(strBuffer, "#Unità espress in %s", volUnits[i]);
         fileBuf.println(logFiles[i]);
         fileBuf.println(strBuffer);
-        fileBuf.println("Time, Volume");
+        fileBuf.println("Time, Volume, Portata ist., Portata media");
       }
       fileBuf.close(); 
     }
@@ -370,11 +370,9 @@ void setup() {
 
 void loop() {
   setRecording();
-  if (recording){
-    digitalLogFlowRate(IMPPIN1);
-    digitalLogFlowRate(IMPPIN2);
-    digitalLogFlowRate(IMPPIN3);
-  }
+  digitalLogFlowRate(IMPPIN1);
+  digitalLogFlowRate(IMPPIN2);
+  digitalLogFlowRate(IMPPIN3);
   setState();
   refreshDisplay();
 
@@ -395,10 +393,31 @@ void setRecording(){
     longPress[0] = true;
 
     recording = !recording;
-    digitalWrite(LEDPIN, recording);
-    digitalWrite(LED_BUILTIN, recording);
-    Serial.println(recording ? "Recording: ON" : "Recording: OFF");
-    t0 =(float) millis()/timeUnit;
+    record(recording);
+    //TODO: Delete old code managed by record func.
+//    recording = !recording;
+//    digitalWrite(LEDPIN, recording);
+//    digitalWrite(LED_BUILTIN, recording);
+//    Serial.println(recording ? "Recording: ON" : "Recording: OFF");
+//    t0 =(float) millis()/timeUnit;
+//    for (short i = 0; i < CHANNELS; i++) {
+//      volume[i] = 0;
+//      flow[i] = 0;
+//      avgFlow[i] = 0;      
+//    }
+  }
+}
+
+void record(bool activation){
+  recording = !activation;
+  digitalWrite(LEDPIN, activation);
+  digitalWrite(LED_BUILTIN, activation);
+  Serial.println(activation ? "Recording: ON" : "Recording: OFF");
+  t0 =(float) millis()/timeUnit;
+  for (short i = 0; i < CHANNELS; i++) {
+    volume[i] = 0;
+    flow[i] = 0;
+    avgFlow[i] = 0;      
   }
 }
 
@@ -423,7 +442,7 @@ void digitalLogFlowRate(int source){
     
     t0 = t1;
     //Serial.println(logMask & (1 << ind));
-    if (logMask & (1 << ind)){
+    if (recording && logMask & (1 << ind)){
       fileBuf = SD.open(logFiles[ind], FILE_WRITE);
       if (!fileBuf)
         Serial.println(F("Error in opening file!!"));
@@ -432,7 +451,7 @@ void digitalLogFlowRate(int source){
         DateTime time = rtc.now();
         sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
         sprintf(strBuffer, time.toString(strBuffer));
-        sprintf(strBuffer, "%s, %lu",strBuffer, volume[ind]);
+        sprintf(strBuffer, "%s, %lu, %.02f, .02f",strBuffer, volume[ind], flow[ind], avgFlow[ind]);
         Serial.println(strBuffer);
         fileBuf.println(strBuffer);
       }
@@ -538,11 +557,13 @@ void refreshDisplay(){
 }
 
 void recordOnDate(){
-  recording = true;
-  digitalWrite(LEDPIN, recording);
-  digitalWrite(LED_BUILTIN, recording);
-  Serial.println(recording ? "Recording: ON" : "Recording: OFF");
-  t0 =(float) millis()/timeUnit;
+  record(true);
+  //TODO: Delete old code managed by record func.
+//  recording = true;
+//  digitalWrite(LEDPIN, recording);
+//  digitalWrite(LED_BUILTIN, recording);
+//  Serial.println(recording ? "Recording: ON" : "Recording: OFF");
+//  t0 =(float) millis()/timeUnit;
   if(rtc.alarmFired(1)) {
     rtc.clearAlarm(1);
     Serial.println("Alarm cleared");
