@@ -589,7 +589,7 @@ void refreshDisplay(){
         if (impulseMask & (1<<i)){
            u8x8.setCursor(i*3,7);
            u8x8.print(" ---");
-           if(instant - lastImp[i] >= IMPVIEWTIME;){
+           if(instant - lastImp[i] >= IMPVIEWTIME){
             impulseMask = logMask ^ (logMask & (1 << i));            
            }
         }
