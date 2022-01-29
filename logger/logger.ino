@@ -2,10 +2,18 @@
  * DataLogging script with following features:
  * - multiple channel reading of impulses representing established volumes of water
  * - display values for each channel about: instant flow, average flow, total volume
- * - log values on SD at established rate (same rate used for refreshing values on display)
+ * - display values at established rate
+ * - log values on SD at established rate
+ * - set a recording date
  * - all preferences read from SD at boot time
  * 
- * Last update: 27/10/2021
+ * TODO: make debug prints cleaner through #define debug
+ * 
+ * Many optimizations are possible, such as using more bitmask and refining
+ * some processes, but it's already good enough for the resources available
+ * on a Arduino Nano Every, ATMEGA328.
+ * 
+ * Last update: 11/2021
  * Author: Antonio Casoli
  */
 
@@ -21,21 +29,36 @@
 #ifdef U8X8_HAVE_HW_I2C
 #include <Wire.h>
 #endif
-U8X8_SSD1306_128X32_UNIVISION_HW_I2C u8x8(U8X8_PIN_NONE);
+//U8X8_SSD1306_128X32_UNIVISION_HW_I2C u8x8(U8X8_PIN_NONE);
+//U8X8_SSD1306_128X64_NONAME_SW_I2C u8x8(/* clock=*/ SCL, /* data=*/ SDA, /* reset=*/ U8X8_PIN_NONE);
+U8X8_SH1106_128X64_NONAME_HW_I2C u8x8(/* reset=*/ U8X8_PIN_NONE);
 
 #include "RTClib.h"
 RTC_DS3231 rtc;
 
-#define LEDPIN 4
-#define RECPIN 5
-#define SETPIN 6
-#define IMPPIN1 7
-#define IMPPIN2 8
-#define IMPPIN3 9
-#define SDPIN 10
+#define LEDPIN A1
+#define RECPIN 2
+#define SETPIN 3
+#define SDPIN 4 //Chip Select
+#define ALARMPIN 5 //SQW from RTC
+//Beware to change the IMPIN order as IMPIN1 is used as reference in the logging function
+#define IMPPIN1 10
+#define IMPPIN2 9
+#define IMPPIN3 8
+#define IMPPIN4 7
+#define IMPPIN5 6
 
 #define CHANNELS 3
-#define VOLDIGITS 4
+
+/*
+ * TODO: Clean debug messages
+#define DEBUG(str) {\
+  if(debug) \
+    Serial.println(str);\
+}
+
+bool debug = true;
+*/
 
 int volumeUnit[CHANNELS] = {-1,-1,-1};
 #define timeUnit 1000
@@ -50,16 +73,26 @@ char volUnits[CHANNELS][4];
 int timeUnits[CHANNELS] = {-1,-1,-1};
 char logFiles[CHANNELS][12];
 
+// Alpha parameter for computing average
 #define ALFA 0.25
 
-short refreshRate[3] = {-1,-1,-1};
+short refreshRate[CHANNELS] = {-1,-1,-1};
+short sdLogRate[CHANNELS] = {-1,-1,-1};
 short refreshMask = 0;
+short logMask = 0;
 
 char strBuffer[40];
 
 bool recording = false;
 short state = 0;
 short oldState = -1;
+
+DateTime recDate;
+
+bool screen = true;
+
+bool longPress[2] = {false, false};
+unsigned long pressTime[2] = {0};
 
 #define PRESS1 1
 #define PRESS2 2
@@ -73,29 +106,81 @@ short oldState = -1;
 
 short pressMask = 0;
 
-#define SETTIME 2000 //millis to press to cycle view
+#define SETTIME 2000 //millis for special func
 
 File fileBuf;
 
 void(* resetFunc) (void) = 0;
 
+void initAlarm(){
+  // Making it so, that the alarm will trigger an interrupt
+  pinMode(ALARMPIN, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(ALARMPIN), recordOnDate, FALLING);
+  
+  // set alarm 1, 2 flag to false (so alarm 1, 2 didn't happen so far)
+  // if not done, this easily leads to problems, as both register aren't reset on reboot/recompile
+  rtc.clearAlarm(1);
+  rtc.clearAlarm(2);
+  
+  // stop oscillating signals at SQW Pin
+  // otherwise setAlarm1 will fail
+  rtc.writeSqwPinMode(DS3231_OFF);
+  
+  // turn off alarm 2 (in case it isn't off already)
+  // again, this isn't done at reboot, so a previously set alarm could easily go overlooked
+  rtc.disableAlarm(2);
+
+  if(!rtc.setAlarm1(
+          recDate,
+          DS3231_A1_Date // this mode triggers the alarm when the seconds match. See Doxygen for other options
+  )) {
+      Serial.println("Error, alarm wasn't set!");
+  }else {
+      Serial.println("Alarm set!");  
+  }
+}
+
+/*
+ * Diplay error on display
+ * Useful for debugging without USB monitor
+ */
 void dispError(char * err1, char * err2){
   Serial.println(F("Disp Err"));
   u8x8.clear();
   //err1.toCharArray(strBuffer,40);
   u8x8.drawString(0,1,err1);
   //err2.toCharArray(strBuffer,40);
-  u8x8.drawString(0,2,err2);
-  u8x8.drawString(0,3,"Premi set per OK");
+  u8x8.drawString(0,2+1,err2);
+  u8x8.drawString(0,4+1,"Premi set per OK");
   int set = 0;
   do{
     set = digitalRead(SETPIN);
   }while(set != LOW);
 }
 
+/* 
+ * setDefaults()
+ * Dummy function useful to skip parsing from SD
+ */
+/*
+void setDefaults(){
+  for (short i=0; i<CHANNELS; i++){
+    sprintf(logFiles[i], "Es%d.csv", i+1);
+    volumeUnit[i] = 100;
+    sprintf(volUnits[i], "m^3");
+    timeUnits[i] = 1;
+    refreshRate[i] = 2;
+  }
+}*/
+
+/*
+ * Main function for parsing the pref file
+ * and initializing all the necessary variables
+ */
 void parseSettings(){
   String buf;
   short i = 0;
+  bool schedRec = false;
   
   // read from the file until there's nothing else in it:
   while (fileBuf.available()) {
@@ -140,10 +225,32 @@ void parseSettings(){
     }else if(strncmp(strBuffer,"Refresh rate",12) == 0){
       i = atoi(&strBuffer[13]);
       refreshRate[i-1] = atoi(&strBuffer[16]);
+    }else if(strncmp(strBuffer,"SD log rate",11) == 0){
+      i = atoi(&strBuffer[12]);
+      sdLogRate[i-1] = atoi(&strBuffer[15]);
+    }else if(strncmp(strBuffer,"Registrazione Programmata:",26) == 0){
+      schedRec = strncmp(&strBuffer[27],"ON",2) == 0;
+      Serial.println(strncmp(&strBuffer[27],"ON",2));
+      Serial.println(&strBuffer[26]);
+      Serial.println(schedRec);
+    }else if(strncmp(strBuffer,"Data&Ora:",9) == 0){
+      //DateTime tmp(&strBuffer[10]);
+      DateTime dt("2021-10-30T07:50:37");
+      recDate = dt;
+      Serial.println(&strBuffer[10]);
+      strcpy(strBuffer, "DDD, DD MMM YYYY hh:mm:ss");
+      Serial.println(recDate.toString(strBuffer));
+      Serial.println(recDate > rtc.now());
     }
   }
+
+  if (schedRec && recDate.isValid() && recDate > rtc.now())
+    initAlarm();
 }
 
+/*
+ * Verifier function to avoid illegal initialization
+ */
 void checkVars(bool fileErr){
   Serial.println(F("Checking Vars"));
   if (fileErr){
@@ -181,6 +288,10 @@ void checkVars(bool fileErr){
   }
 }
 
+/*
+ * If not present, create 
+ * log files with required headers
+ */
 void writeHeaders(){
   for (short i = 0; i < CHANNELS; i++){
     if (!SD.exists(logFiles[i])){
@@ -189,9 +300,10 @@ void writeHeaders(){
         Serial.println(F("Error in opening file!!"));
       else{
         Serial.println(F("File opened succesfully!!"));
-        sprintf(strBuffer, "Time, Volume");
-        Serial.println(strBuffer);
+        sprintf(strBuffer, "#Unità espress in %s", volUnits[i]);
+        fileBuf.println(logFiles[i]);
         fileBuf.println(strBuffer);
+        fileBuf.println("Time, Volume");
       }
       fileBuf.close(); 
     }
@@ -201,6 +313,7 @@ void writeHeaders(){
 void setup() {
   Serial.begin(9600);  
 
+  //Set all pins
   pinMode(RECPIN,INPUT);
   pinMode(SETPIN,INPUT);
   pinMode(IMPPIN1,INPUT);
@@ -209,20 +322,29 @@ void setup() {
   pinMode(LEDPIN, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
 
+  //Initialize display Lib
   u8x8.begin();
   u8x8.setFont(u8x8_font_amstrad_cpc_extended_f);
+  //u8x8.setFont(u8x8_font_px437wyse700a_2x2_f);
 
+
+  //Initialize RTC module
   if (!rtc.begin()) {
     Serial.println(F("Couldn't find RTC"));
+    dispError("RTC Error", "Check RTC");
     Serial.flush();
-    abort();
+    delay(2);
+    resetFunc();
   }
   rtc.disable32K();
 
+  //Initialize SD Lib
   bool fileErr = false;
   if (!SD.begin(SDPIN)) {
     Serial.println(F("initialization failed!"));
-    while (1);
+    dispError("SD Error", "Check SD");
+    delay(2);
+    resetFunc();
   }
   Serial.println(F("SD initialization done."));
   
@@ -254,7 +376,6 @@ void loop() {
     digitalLogFlowRate(IMPPIN3);
   }
   setState();
-  //stateFunctions();
   refreshDisplay();
 
   oldState = state;
@@ -264,9 +385,15 @@ void setRecording(){
   int rec = digitalRead(RECPIN);
   if (rec == LOW  && !PRESSED4){
     pressMask += PRESS4;
+    pressTime[0] = millis();
     Serial.println(F("Pressed1"));
   }else if(rec == HIGH && PRESSED4){
     pressMask -= PRESS4;
+    longPress[0] = false;
+  }if(PRESSED4 && rec == LOW && (millis() - pressTime[0]) > SETTIME){  
+    pressTime[0] = millis();
+    longPress[0] = true;
+
     recording = !recording;
     digitalWrite(LEDPIN, recording);
     digitalWrite(LED_BUILTIN, recording);
@@ -277,7 +404,7 @@ void setRecording(){
 
 void digitalLogFlowRate(int source){
   int impulso = digitalRead(source);
-  short ind = source - IMPPIN1;
+  short ind = IMPPIN1 - source;
   if (impulso == LOW  && !(pressMask & (1 << ind))){
     t1 = (float) millis()/timeUnit;
     pressMask += 1 << ind;
@@ -285,6 +412,8 @@ void digitalLogFlowRate(int source){
 
     if (impCount[ind] % refreshRate[ind] == 0)
       refreshMask += 1 << ind;
+    if (impCount[ind] % sdLogRate[ind] == 0)
+      logMask += 1 << ind;
     
     volume[ind] += volumeUnit[ind];
     flow[ind] = (float) volumeUnit[ind] / (t1 - t0);
@@ -293,9 +422,8 @@ void digitalLogFlowRate(int source){
     avgFlow[ind] = (float) ( isinf(tmp) ? (1-ALFA)*avgFlow[ind] : tmp  + (1-ALFA)*avgFlow[ind]);
     
     t0 = t1;
-
-    //TODO: log ONLY at refresh rate
-    if (refreshMask & (1 << ind)){
+    //Serial.println(logMask & (1 << ind));
+    if (logMask & (1 << ind)){
       fileBuf = SD.open(logFiles[ind], FILE_WRITE);
       if (!fileBuf)
         Serial.println(F("Error in opening file!!"));
@@ -304,11 +432,14 @@ void digitalLogFlowRate(int source){
         DateTime time = rtc.now();
         sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
         sprintf(strBuffer, time.toString(strBuffer));
-        sprintf(strBuffer, "%s, %d",strBuffer, volume[ind]);
+        sprintf(strBuffer, "%s, %lu",strBuffer, volume[ind]);
         Serial.println(strBuffer);
         fileBuf.println(strBuffer);
       }
-      fileBuf.close();    
+      fileBuf.close();
+      //TODO: check this piece of code, should be correct
+      logMask = logMask ^ (logMask & (1 << ind));
+      //Serial.println(logMask & (1 << ind));
     }    
   }else if(impulso == HIGH && (pressMask & (1 << ind))){
     pressMask -= 1 << ind;
@@ -319,63 +450,101 @@ void setState(){
   int action = digitalRead(SETPIN);
   if (action == LOW  && !PRESSED5){
     pressMask += PRESS5;
+    pressTime[1] = millis();
   }else if(action == HIGH && PRESSED5){
     pressMask -= PRESS5;
-    state = (state + 1) % 3;
+    if(!longPress[1])
+      state = (state + 1) % 3;
+    longPress[1] = false;
+  }
+  if(PRESSED5 && action == LOW && (millis() - pressTime[1]) > SETTIME){
+    screen = !screen;
+    digitalWrite(LED_BUILTIN, screen);
+    if (!screen)
+      u8x8.clear();
+    else
+      refreshMask = 1+2+4+8+16;
+    
+    
+    pressTime[1] = millis();
+    longPress[1] = true;
   }
 }
   
 void refreshDisplay(){
-  u8x8.setFont(u8x8_font_chroma48medium8_r);
-  if (state != oldState || refreshMask){
-    if (state != oldState)
-      u8x8.clear();
+  if (screen){
+    //u8x8.setFont(u8x8_font_chroma48medium8_r);
+    if (state != oldState || refreshMask){
+      if (state != oldState)
+        u8x8.clear();
+  
+      char timeU = 'u';
+      switch(state){
+        case 0:
+          //u8x8.clearLine(0);
+          u8x8.drawString(0,0,"Portata ist.");
+          for (short i = 0; i < CHANNELS; i++) {
+            if (state != oldState || refreshMask & (1<<i)){
+              u8x8.setCursor(0,2*i+2);
+              double flo = (double) (isinf(flow[i]) ? 0 : flow[i] * timeUnits[i]);
+              timeU = timeUnits[i] == 1 ? 's' : (timeUnits[i] == 60 ? 'm' : 'h');
+              //sprintf(strBuffer, "%d: %s %s/%c", i+1, String(flo,2), volUnits[i], timeU); 
+              (String(i+1) + ": " + String(flo,2) + " " + volUnits[i] + "/"+ timeU).toCharArray(strBuffer, 15);
+              u8x8.print(strBuffer);
+            }              
+          }
+          break;            
+        case 1:
+          u8x8.drawString(0,0,"Media");
+          for (short i = 0; i < CHANNELS; i++) {
+            if (state != oldState || refreshMask & (1<<i)){
+              u8x8.setCursor(0,2*i+2);
+              double avgFlo = (double) (isinf(avgFlow[i]) ? 0 :  avgFlow[i] * timeUnits[i]);
+              timeU = timeUnits[i] == 1 ? 's' : (timeUnits[i] == 60 ? 'm' : 'h');
+              (String(i+1) + ": " + String(avgFlo,2) + " " + volUnits[i] + "/"+ timeU).toCharArray(strBuffer, 15);
+              u8x8.print(strBuffer);
+            }
+          }
+          break;
+        case 2:
+          u8x8.drawString(0,0,"Volume");
+          for (short i = 0; i < CHANNELS; i++) {
+            if (state != oldState || refreshMask & (1<<i)){
+              u8x8.setCursor(0,2*i+2);
+              (String(i+1) + ": " + String(volume[i])+ " "+ volUnits[i]).toCharArray(strBuffer, 15);
+              u8x8.print(strBuffer);
+            }
+          }
+          break;
+        /*TODO: display time as last state
+        case 3:
+          u8x8.drawString(0,0,"Time");
+          DateTime nowTime = rtc.now();
+          DateTime time = rtc.now();
+          sprintf(strBuffer, time.toString("DD-MM-YYYY"));
+          drawString(2,3,strBuffer);
+          sprintf(strBuffer, time.toString("hh:mm"));
+          drawString(5,5,strBuffer);     
+          break;*/
+        default:
+          //u8x8.setCursor(4,1);
+          u8x8.drawString(4,1,"STATE ERROR!");
+          break;
+      }
+      refreshMask = 0;
+    } 
+  }
+  
+}
 
-    char timeU = 'u';
-    switch(state){
-      case 0:
-        //u8x8.clearLine(0);
-        u8x8.drawString(0,0,"Portata ist.");
-        for (short i = 0; i < CHANNELS; i++) {
-          if (state != oldState || refreshMask & (1<<i)){
-            u8x8.setCursor(0,i+1);
-            //TODO: convert unit using right timeUnit
-            double flo = (double) flow[i] * timeUnits[i];
-            timeU = timeUnits[i] == 1 ? 's' : (timeUnits[i] == 60 ? 'm' : 'h');
-            //sprintf(strBuffer, "%d: %s %s/%c", i+1, String(flo,3), volUnits[i], timeU); 
-            (String(i+1) + ": " + String(flo,3) + " " + volUnits[i] + "/"+ timeU).toCharArray(strBuffer, 15);
-            u8x8.print(strBuffer);
-          }              
-        }
-        break;            
-      case 1:
-        u8x8.drawString(0,0,"Media");
-        for (short i = 0; i < CHANNELS; i++) {
-          if (state != oldState || refreshMask & (1<<i)){
-            u8x8.setCursor(0,i+1);
-            //TODO: convert unit using right timeUnit
-            double avgFlo = (double) avgFlow[i] * timeUnits[i];
-            timeU = timeUnits[i] == 1 ? 's' : (timeUnits[i] == 60 ? 'm' : 'h');
-            (String(i+1) + ": " + String(avgFlo,3) + " " + volUnits[i] + "/"+ timeU).toCharArray(strBuffer, 15);
-            u8x8.print(strBuffer);
-          }
-        }
-        break;
-      case 2:
-        u8x8.drawString(0,0,"Volume");
-        for (short i = 0; i < CHANNELS; i++) {
-          if (state != oldState || refreshMask & (1<<i)){
-            u8x8.setCursor(0,i+1);
-            (String(i+1) + ": " + String(volume[i])+ " "+ volUnits[i]).toCharArray(strBuffer, 15);
-            u8x8.print(strBuffer);
-          }
-        }
-        break;
-      default:
-        //u8x8.setCursor(4,1);
-        u8x8.drawString(4,1,"STATE ERROR!");
-        break;
-    }
-    refreshMask = 0;
+void recordOnDate(){
+  recording = true;
+  digitalWrite(LEDPIN, recording);
+  digitalWrite(LED_BUILTIN, recording);
+  Serial.println(recording ? "Recording: ON" : "Recording: OFF");
+  t0 =(float) millis()/timeUnit;
+  if(rtc.alarmFired(1)) {
+    rtc.clearAlarm(1);
+    Serial.println("Alarm cleared");
   }
 }
