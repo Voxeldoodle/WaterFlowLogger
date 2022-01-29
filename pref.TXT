@@ -1,0 +1,60 @@
+% File di impostazioni per il logger
+% Usare il simbolo '%' per commenti (solo inizio riga)
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Nomi file per ogni canale (max 8 caratteri + ext)
+% Lasciare spazio dopo ':' del nome del campo
+% Il display visualizzerà solamente i primi due caratteri del nome
+Nome 1: P3.csv
+Nome 2: P4.csv
+Nome 3: P5.csv
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Unità di volume registrate a ogni impulso
+% Max 3 caratteri per unità (Es. m^3 == 3 caratteri)
+% Lasciare spazio dopo ':' del nome del campo
+VolumeUnit  1: 0.1 m3
+VolumeUnit  2: 0.1 m3
+VolumeUnit  3: 0.1 m3
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Unità di tempo desiderata da visualizzare
+% Opzioni vincolate a 'h', 'm', 's'
+% Lasciare spazio dopo ':' del nome del campo
+TimeUnit   1: h
+TimeUnit   2: h
+TimeUnit   3: h
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Tasso di aggiornamento del valore sul display
+% Il valore indica ogni quanti secondi. 
+% Decimi e centesimi indicabili come es: 0.5
+% Lasciare spazio dopo ':' del nome del campo
+Refresh rate 1: 2
+Refresh rate 2: 2
+Refresh rate 3: 2
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Tasso di aggiornamento del salvataggio su SD
+% Il valore indica ogni quanti secondi.
+% Decimi e centesimi indicabili come es: 0.5
+% Lasciare spazio dopo ':' del nome del campo
+SD log rate 1: 5
+SD log rate 2: 5
+SD log rate 3: 5
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% Data in cui far partire la registrazione
+% Attivazione impostata con ON o OFF nel campo
+% Formato YYYY-MM-DDTHH:mm:ss
+% T serve solo come separatore tra data e orario
+% L'orologio è impostato sull'ora solare
+% Lasciare spazio dopo ':' del nome del campo
+Registrazione Programmata: ON
+Data&Ora: 2021-10-29T07:20:00
+% Se impostato a ON ma la data è passata verrà ignorato
+
+%Headers
+%Es1.csv
+%#Unità espresse in ...
+%DateTime, Volume
+%YYYY/MM/DD hh:mm:ss, xxxxxxxxx

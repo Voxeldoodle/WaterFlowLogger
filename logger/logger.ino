@@ -45,7 +45,7 @@ RTC_DS3231 rtc;
 #define SETPIN 3
 #define SDPIN 4 //Chip Select
 #define ALARMPIN 5 //SQW from RTC
-//Beware to change the IMpPIN order as IMPPpIN1 is used as reference in the readImpulse function
+//Beware to change the IMPPIN order as IMPPpIN1 is used as reference in the readImpulse function
 #define IMPPIN1 10
 #define IMPPIN2 9
 #define IMPPIN3 8
@@ -70,22 +70,23 @@ double volumeUnit[CHANNELS] = {-1,-1,-1};
 #define timeUnit 1000
 double volume[CHANNELS] = {0};
 float flow[CHANNELS] = {0};
-float avgFlow[CHANNELS] = {0};
-short impCount[CHANNELS] = {0};
 unsigned long lastImp[CHANNELS] = {0};
 
 char volUnits[CHANNELS][4];
 int timeUnits[CHANNELS] = {-1,-1,-1};
 char logFiles[CHANNELS][12];
 
-// Alpha parameter for computing average
-#define ALFA 0.25
-
 int refreshRate[CHANNELS] = {-1,-1,-1};
 int sdLogRate[CHANNELS] = {-1,-1,-1};
 short refreshMask = 0;
+short impulseMask = 0;
 short logMask = 0;
 unsigned long refreshInterval[2] = {0};
+
+unsigned long impulseDispInterval[CHANNELS] = {0};
+// Blink time for impulse
+#define IMPVIEWTIME 500
+
 
 char strBuffer[40];
 
@@ -112,7 +113,12 @@ unsigned long pressTime[2] = {0};
 
 short pressMask = 0;
 
-#define SETTIME 2000 //millis for special func
+#define SETTIME 2000 //millis for special func. Keep it lower than SETBUFFER.
+// Define time interval buffer for a button to
+// make a signal. This is to counteract jiggly and
+// unreliable button presses.
+#define RECBUFFER 1500 //millis to keep REC pressed for signal 
+#define SETBUFFER 100 //millis to keep SET pressed for signal
 
 File fileBuf;
 
@@ -215,19 +221,26 @@ void parseSettings(){
       i = atoi(&strBuffer[5]);
       strcpy(logFiles[i-1], &strBuffer[8]);
       
-    }else if(strncmp(strBuffer,"Unità volume", 12) == 0){
-      i = atoi(&strBuffer[13]);
-      volumeUnit[i-1] = atof(&strBuffer[17]);
+    }else if(strncmp(strBuffer,"VolumeUnit", 11) == 0){
+      i = atoi(&strBuffer[12]);
       
-      short j = 17;
+      short j = 16;
+      volumeUnit[i-1] = atof(&strBuffer[j]);
+      
       while(strBuffer[j] != ' '){
         j++;
       }
       strcpy(volUnits[i-1], &strBuffer[++j]);
       
-    }else if(strncmp(strBuffer,"Unità tempo",11) == 0){
-      i = atoi(&strBuffer[13]);
-      switch(strBuffer[16]){
+    }else if(strncmp(strBuffer,"TimeUnit",10) == 0){
+      i = atoi(&strBuffer[11]);
+      short j = 13;
+      while(strBuffer[j] != ' '){
+        //Serial.println(strBuffer[j]);
+        //Serial.println(j);
+        j++;
+      }
+      switch(strBuffer[++j]){
         case 's':
           timeUnits[i-1] = 1;
           break;
@@ -241,6 +254,8 @@ void parseSettings(){
           timeUnits[i-1] = -1;
           break;
       }
+      Serial.println(timeUnits[i-1]);
+      Serial.println(i);
       
     }else if(strncmp(strBuffer,"Refresh rate",12) == 0){
       i = atoi(&strBuffer[13]);
@@ -283,20 +298,26 @@ void checkVars(bool fileErr){
   }
   for (short i=0; i<CHANNELS; i++){
     if (volumeUnit[i] < 0){
+      Serial.println(volumeUnit[i]);
       volumeUnit[i] = 0;
       sprintf(strBuffer, "Volume %d error", i+1);
+      Serial.println(strBuffer);
       if (!fileErr)
         dispError(strBuffer, "Default val 0");
     }
     if (timeUnits[i] < 0){
+      Serial.println(timeUnits[i]);
       timeUnits[i] = 1;
       sprintf(strBuffer, "TimeUnit %d error", i+1);
+      Serial.println(strBuffer);
       if (!fileErr)
         dispError(strBuffer, "Default val s");
     }
     if (refreshRate[i] < 0){
+      Serial.println(refreshRate[i]);
       refreshRate[i] = 1;
       sprintf(strBuffer, "Refresh %d error", i+1);
+      Serial.println(strBuffer);
       if (!fileErr)
         dispError(strBuffer, "Default val 1");
     }
@@ -409,7 +430,7 @@ void setRecording(){
   }else if(rec == HIGH && PRESSED4){
     pressMask -= PRESS4;
     longPress[0] = false;
-  }if(PRESSED4 && rec == LOW && (millis() - pressTime[0]) > SETTIME){  
+  }if(PRESSED4 && rec == LOW && (millis() - pressTime[0]) > RECBUFFER){  
     pressTime[0] = millis();
     longPress[0] = true;
 
@@ -427,7 +448,6 @@ void record(bool activation){
   for (short i = 0; i < CHANNELS; i++) {
     volume[i] = 0;
     flow[i] = 0;
-    avgFlow[i] = 0;
     lastImp[i] = instant;      
   }
 }
@@ -436,8 +456,9 @@ void readImpulse(int source){
   int impulso = digitalRead(source);
   short ind = IMPPIN1 - source;
   if (impulso == LOW  && !(pressMask & (1 << ind))){
-    pressMask += 1 << ind;    
-    volume[ind] += volumeUnit[ind];
+    pressMask += 1 << ind;
+    impulseMask += 1 << ind;
+    volume[ind] += volumeUnit[ind];    
     lastImp[ind] = millis();
   }else if(impulso == HIGH && (pressMask & (1 << ind))){
     pressMask -= 1 << ind;
@@ -459,12 +480,7 @@ void calculateFlow(){
         logMask += 1 << i;
       }
       
-      flow[i] = volume[i] / (((float)(instant-lastImp[i]))/timeUnit);
-
-      //Beware, avg just indicative at the moment, since it is susceptible to both rates, refresh and log.
-      //Requirements to be defined for which rate to update the avg.
-      float tmp = ALFA * flow[i];
-      avgFlow[i] = (float) ( isinf(tmp) ? (1-ALFA)*avgFlow[i] : tmp  + (1-ALFA)*avgFlow[i]);
+      flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(instant-lastImp[i]))/timeUnit);
       
       //Serial.println(logMask & (1 << i));
       if (recording && logMask & (1 << i)){
@@ -476,7 +492,7 @@ void calculateFlow(){
           DateTime time = rtc.now();
           sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
           sprintf(strBuffer, time.toString(strBuffer));
-          sprintf(strBuffer, "%s, %.02f, %.02f, .02f",strBuffer, volume[i], flow[i], avgFlow[i]);
+          sprintf(strBuffer, "%s, %.02f, %.02f",strBuffer, volume[i], flow[i]);
           Serial.println(strBuffer);
           fileBuf.println(strBuffer);
         }
@@ -490,25 +506,28 @@ void calculateFlow(){
 
 void setState(){
   int action = digitalRead(SETPIN);
+  unsigned long instant = millis();
   if (action == LOW  && !PRESSED5){
     pressMask += PRESS5;
-    pressTime[1] = millis();
-  }else if(action == HIGH && PRESSED5){
+    pressTime[1] = instant;
+  }else if(action == HIGH && PRESSED5  && (instant - pressTime[1]) > SETBUFFER){
     pressMask -= PRESS5;
+
+    //avoid changing state if pressing for special function 
     if(!longPress[1])
       state = (state + 1) % 3;
     longPress[1] = false;
   }
-  if(PRESSED5 && action == LOW && (millis() - pressTime[1]) > SETTIME){
+  if(PRESSED5 && action == LOW && (instant - pressTime[1]) > SETTIME){
     screen = !screen;
     digitalWrite(LED_BUILTIN, screen);
     if (!screen)
       u8x8.clear();
     else
-      refreshMask = 1+2+4+8+16;
+      refreshMask = 1+2+4+8+16+32;
     
     
-    pressTime[1] = millis();
+    pressTime[1] = instant;
     longPress[1] = true;
   }
 }
@@ -527,54 +546,55 @@ void refreshDisplay(){
           u8x8.drawString(0,0,"Portata ist.");
           for (short i = 0; i < CHANNELS; i++) {
             if (state != oldState || refreshMask & (1<<i)){
+              u8x8.clearLine(2*i+2);
               u8x8.setCursor(0,2*i+2);
-              double flo = (double) (isinf(flow[i]) ? 0 : flow[i] * timeUnits[i]);
+              double flo = (double) (isinf(flow[i]) ? 0 : flow[i]);
               timeU = timeUnits[i] == 1 ? 's' : (timeUnits[i] == 60 ? 'm' : 'h');
               //sprintf(strBuffer, "%d: %s %s/%c", i+1, String(flo,2), volUnits[i], timeU); 
               (String(i+1) + ": " + String(flo,2) + " " + volUnits[i] + "/"+ timeU).toCharArray(strBuffer, 15);
               u8x8.print(strBuffer);
-            }              
-          }
-          break;            
-        case 1:
-          u8x8.drawString(0,0,"Media");
-          for (short i = 0; i < CHANNELS; i++) {
-            if (state != oldState || refreshMask & (1<<i)){
-              u8x8.setCursor(0,2*i+2);
-              double avgFlo = (double) (isinf(avgFlow[i]) ? 0 :  avgFlow[i] * timeUnits[i]);
-              timeU = timeUnits[i] == 1 ? 's' : (timeUnits[i] == 60 ? 'm' : 'h');
-              (String(i+1) + ": " + String(avgFlo,2) + " " + volUnits[i] + "/"+ timeU).toCharArray(strBuffer, 15);
-              u8x8.print(strBuffer);
             }
           }
-          break;
-        case 2:
+          break;          
+        case 1:
           u8x8.drawString(0,0,"Volume");
           for (short i = 0; i < CHANNELS; i++) {
             if (state != oldState || refreshMask & (1<<i)){
+              u8x8.clearLine(2*i+2);
               u8x8.setCursor(0,2*i+2);
               (String(i+1) + ": " + String(volume[i])+ " "+ volUnits[i]).toCharArray(strBuffer, 15);
               u8x8.print(strBuffer);
             }
           }
           break;
-        /*TODO: display time as last state
-        case 3:
+        case 2:
           u8x8.drawString(0,0,"Time");
           DateTime nowTime = rtc.now();
           DateTime time = rtc.now();
           sprintf(strBuffer, time.toString("DD-MM-YYYY"));
-          drawString(2,3,strBuffer);
+          u8x8.drawString(2,3,strBuffer);
           sprintf(strBuffer, time.toString("hh:mm"));
-          drawString(5,5,strBuffer);     
-          break;*/
+          u8x8.drawString(5,5,strBuffer);
         default:
           //u8x8.setCursor(4,1);
           u8x8.drawString(4,1,"STATE ERROR!");
           break;
       }
+      
       refreshMask = 0;
-    } 
+    }
+    if (impulseMask){
+      unsigned long instant = millis();
+      for (short i = 0; i < CHANNELS; i++) {
+        if (impulseMask & (1<<i)){
+           u8x8.setCursor(i*3,7);
+           u8x8.print(" ---");
+           if(instant - lastImp[i] >= IMPVIEWTIME;){
+            impulseMask = logMask ^ (logMask & (1 << i));            
+           }
+        }
+      }
+    }
   }
   
 }
