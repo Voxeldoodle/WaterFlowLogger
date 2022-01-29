@@ -1,5 +1,5 @@
 # WaterFlowLogger
- Arduino Code for Water Flow logging activities 
+ Arduino Code for Water Flow logging activities through multiple channels (3).
  
  Librerie necessarie per logger(installabili cercando da gestione librerie da Arduino IDE):
 - Arduino megaAVR boards (x comunicare con scheda. Basta cercare nano every e dovrebbe comparire)
