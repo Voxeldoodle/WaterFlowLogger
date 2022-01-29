@@ -7,9 +7,11 @@
  * - set a recording date
  * - all preferences read from SD at boot time
  * 
- * 6.1 update: added float values for volume input
+ * 7.0 update: conversion from impulse rate to time rate
  * 
- * TODO: make debug prints cleaner through #define debug
+ * TODO: 
+ * - make debug prints cleaner through #define debug
+ * - eventually add serial monitor initialization
  * 
  * Many optimizations are possible, such as using more bitmask and refining
  * some processes, but it's already good enough for the resources available
@@ -43,7 +45,7 @@ RTC_DS3231 rtc;
 #define SETPIN 3
 #define SDPIN 4 //Chip Select
 #define ALARMPIN 5 //SQW from RTC
-//Beware to change the IMpPIN order as IMPpIN1 is used as reference in the digitalLogFlowRate function
+//Beware to change the IMpPIN order as IMPPpIN1 is used as reference in the readImpulse function
 #define IMPPIN1 10
 #define IMPPIN2 9
 #define IMPPIN3 8
@@ -53,23 +55,24 @@ RTC_DS3231 rtc;
 #define CHANNELS 3
 
 /*
- * TODO: Clean debug messages
-#define DEBUG(str) {\
-  if(debug) \
-    Serial.println(str);\
-}
+//TODO: Change Debug Serial.print with Macro PRINT
+#undef DEBUG
+#define DEBUG 1
 
-bool debug = true;
+#define PRINT(str) {\
+  #ifdef DEBUG \
+    Serial.println(str); \
+  #endif \
+}
 */
 
 double volumeUnit[CHANNELS] = {-1,-1,-1};
 #define timeUnit 1000
 double volume[CHANNELS] = {0};
-float t0;
-float t1;
 float flow[CHANNELS] = {0};
 float avgFlow[CHANNELS] = {0};
-short impCount[3] = {0};
+short impCount[CHANNELS] = {0};
+unsigned long lastImp[CHANNELS] = {0};
 
 char volUnits[CHANNELS][4];
 int timeUnits[CHANNELS] = {-1,-1,-1};
@@ -78,10 +81,11 @@ char logFiles[CHANNELS][12];
 // Alpha parameter for computing average
 #define ALFA 0.25
 
-short refreshRate[CHANNELS] = {-1,-1,-1};
-short sdLogRate[CHANNELS] = {-1,-1,-1};
+int refreshRate[CHANNELS] = {-1,-1,-1};
+int sdLogRate[CHANNELS] = {-1,-1,-1};
 short refreshMask = 0;
 short logMask = 0;
+unsigned long refreshInterval[2] = {0};
 
 char strBuffer[40];
 
@@ -240,10 +244,10 @@ void parseSettings(){
       
     }else if(strncmp(strBuffer,"Refresh rate",12) == 0){
       i = atoi(&strBuffer[13]);
-      refreshRate[i-1] = atoi(&strBuffer[16]);
+      refreshRate[i-1] = (int) (atof(&strBuffer[16]) * 1000);
     }else if(strncmp(strBuffer,"SD log rate",11) == 0){
       i = atoi(&strBuffer[12]);
-      sdLogRate[i-1] = atoi(&strBuffer[15]);
+      sdLogRate[i-1] = (int) (atof(&strBuffer[15])* 1000);
     }else if(strncmp(strBuffer,"Registrazione Programmata:",26) == 0){
       schedRec = strncmp(&strBuffer[27],"ON",2) == 0;
       Serial.println(strncmp(&strBuffer[27],"ON",2));
@@ -386,9 +390,10 @@ void setup() {
 
 void loop() {
   setRecording();
-  digitalLogFlowRate(IMPPIN1);
-  digitalLogFlowRate(IMPPIN2);
-  digitalLogFlowRate(IMPPIN3);
+  readImpulse(IMPPIN1);
+  readImpulse(IMPPIN2);
+  readImpulse(IMPPIN3);
+  calculateFlow();
   setState();
   refreshDisplay();
 
@@ -418,55 +423,68 @@ void record(bool activation){
   digitalWrite(LEDPIN, activation);
   digitalWrite(LED_BUILTIN, activation);
   Serial.println(activation ? "Recording: ON" : "Recording: OFF");
-  t0 =(float) millis()/timeUnit;
+  unsigned long instant = millis();
   for (short i = 0; i < CHANNELS; i++) {
     volume[i] = 0;
     flow[i] = 0;
-    avgFlow[i] = 0;      
+    avgFlow[i] = 0;
+    lastImp[i] = instant;      
   }
 }
 
-void digitalLogFlowRate(int source){
+void readImpulse(int source){
   int impulso = digitalRead(source);
   short ind = IMPPIN1 - source;
   if (impulso == LOW  && !(pressMask & (1 << ind))){
-    t1 = (float) millis()/timeUnit;
-    pressMask += 1 << ind;
-    impCount[ind] += 1;
-
-    if (impCount[ind] % refreshRate[ind] == 0)
-      refreshMask += 1 << ind;
-    if (impCount[ind] % sdLogRate[ind] == 0)
-      logMask += 1 << ind;
-    
+    pressMask += 1 << ind;    
     volume[ind] += volumeUnit[ind];
-    flow[ind] = (float) volumeUnit[ind] / (t1 - t0);
-
-    float tmp = ALFA * flow[ind];
-    avgFlow[ind] = (float) ( isinf(tmp) ? (1-ALFA)*avgFlow[ind] : tmp  + (1-ALFA)*avgFlow[ind]);
-    
-    t0 = t1;
-    //Serial.println(logMask & (1 << ind));
-    if (recording && logMask & (1 << ind)){
-      fileBuf = SD.open(logFiles[ind], FILE_WRITE);
-      if (!fileBuf)
-        Serial.println(F("Error in opening file!!"));
-      else{
-        Serial.println(F("File opened succesfully!!"));
-        DateTime time = rtc.now();
-        sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
-        sprintf(strBuffer, time.toString(strBuffer));
-        sprintf(strBuffer, "%s, %.02f, %.02f, .02f",strBuffer, volume[ind], flow[ind], avgFlow[ind]);
-        Serial.println(strBuffer);
-        fileBuf.println(strBuffer);
-      }
-      fileBuf.close();
-      //TODO: check this piece of code, should be correct
-      logMask = logMask ^ (logMask & (1 << ind));
-      //Serial.println(logMask & (1 << ind));
-    }    
+    lastImp[ind] = millis();
   }else if(impulso == HIGH && (pressMask & (1 << ind))){
     pressMask -= 1 << ind;
+  }
+}
+
+void calculateFlow(){
+  unsigned long instant = millis();
+  for (short i = 0; i < CHANNELS; i++) {
+    bool dispRefresh = instant - refreshInterval[0] >= refreshRate[i];
+    bool logRefresfh = instant - refreshInterval[1] >= sdLogRate[i];
+    if(dispRefresh || logRefresfh){
+      if (dispRefresh){
+        refreshInterval[0] = instant;
+        refreshMask += 1 << i;
+      }        
+      if (logRefresfh){
+        refreshInterval[1] = instant;
+        logMask += 1 << i;
+      }
+      
+      flow[i] = volume[i] / (((float)(instant-lastImp[i]))/timeUnit);
+
+      //Beware, avg just indicative at the moment, since it is susceptible to both rates, refresh and log.
+      //Requirements to be defined for which rate to update the avg.
+      float tmp = ALFA * flow[i];
+      avgFlow[i] = (float) ( isinf(tmp) ? (1-ALFA)*avgFlow[i] : tmp  + (1-ALFA)*avgFlow[i]);
+      
+      //Serial.println(logMask & (1 << i));
+      if (recording && logMask & (1 << i)){
+        fileBuf = SD.open(logFiles[i], FILE_WRITE);
+        if (!fileBuf)
+          Serial.println(F("Error in opening file!!"));
+        else{
+          Serial.println(F("File opened succesfully!!"));
+          DateTime time = rtc.now();
+          sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
+          sprintf(strBuffer, time.toString(strBuffer));
+          sprintf(strBuffer, "%s, %.02f, %.02f, .02f",strBuffer, volume[i], flow[i], avgFlow[i]);
+          Serial.println(strBuffer);
+          fileBuf.println(strBuffer);
+        }
+        fileBuf.close();
+        logMask = logMask ^ (logMask & (1 << i));
+        //Serial.println(logMask & (1 << i));
+      }
+    }
   }
 }
 
