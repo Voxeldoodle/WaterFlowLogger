@@ -93,23 +93,12 @@ void dispError(char * err1, char * err2){
   }while(set != LOW);
 }
 
-void setDefaults(){
-  for (short i=0; i<CHANNELS; i++){
-    sprintf(logFiles[i], "Es%d.csv", i+1);
-    volumeUnit[i] = 100;
-    sprintf(volUnits[i], "m^3");
-    timeUnits[i] = 1;
-    refreshRate[i] = 2;
-  }
-}
-
 void parseSettings(){
   String buf;
   short i = 0;
   
   // read from the file until there's nothing else in it:
   while (fileBuf.available()) {
-    i = 0;
     buf = fileBuf.readStringUntil('\n');
     Serial.println(buf);
     //skip commented lines
@@ -117,17 +106,22 @@ void parseSettings(){
       continue; 
     }
     buf.toCharArray(strBuffer,40);
-    
-    if(strncmp(strBuffer,"Nome", 4) == 0){
-      sscanf(&strBuffer[4]," %d",&i);
-      sscanf(&strBuffer[8],"%s",logFiles[i-1]);
+    if(strncmp(strBuffer,"Nome", 4) ==0){
+      i = atoi(&strBuffer[5]);
+      strcpy(logFiles[i-1], &strBuffer[8]);
       
     }else if(strncmp(strBuffer,"Unità volume", 12) == 0){
-      sscanf(&strBuffer[13]," %d",&i);
-      sscanf(&strBuffer[17],"%d %s",&volumeUnit[i-1], volUnits[i-1]);
+      i = atoi(&strBuffer[13]);
+      volumeUnit[i-1] = atoi(&strBuffer[17]);
+      
+      short j = 17;
+      while(strBuffer[j] != ' '){
+        j++;
+      }
+      strcpy(volUnits[i-1], &strBuffer[++j]);
       
     }else if(strncmp(strBuffer,"Unità tempo",11) == 0){
-      sscanf(&strBuffer[12]," %d:",&i);
+      i = atoi(&strBuffer[13]);
       switch(strBuffer[16]){
         case 's':
           timeUnits[i-1] = 1;
@@ -144,8 +138,8 @@ void parseSettings(){
       }
       
     }else if(strncmp(strBuffer,"Refresh rate",12) == 0){
-      sscanf(&strBuffer[12]," %d",&i);
-      sscanf(&strBuffer[16],"%d",&refreshRate[i-1]);
+      i = atoi(&strBuffer[13]);
+      refreshRate[i-1] = atoi(&strBuffer[16]);
     }
   }
 }
@@ -189,16 +183,18 @@ void checkVars(bool fileErr){
 
 void writeHeaders(){
   for (short i = 0; i < CHANNELS; i++){
-    fileBuf = SD.open(logFiles[i], FILE_WRITE);
-    if (!fileBuf)
-      Serial.println(F("Error in opening file!!"));
-    else{
-      Serial.println(F("File opened succesfully!!"));
-      sprintf(strBuffer, "Time, Volume");
-      Serial.println(strBuffer);
-      fileBuf.println(strBuffer);
+    if (!SD.exists(logFiles[i])){
+      fileBuf = SD.open(logFiles[i], FILE_WRITE);
+      if (!fileBuf)
+        Serial.println(F("Error in opening file!!"));
+      else{
+        Serial.println(F("File opened succesfully!!"));
+        sprintf(strBuffer, "Time, Volume");
+        Serial.println(strBuffer);
+        fileBuf.println(strBuffer);
+      }
+      fileBuf.close(); 
     }
-    fileBuf.close();
   }
 }
 
@@ -235,7 +231,6 @@ void setup() {
   if (fileBuf) {
     Serial.println(F("opened pref"));
     parseSettings();
-    setDefaults();
   } else {
     // if the file didn't open, print an error:
     Serial.println(F("error opening pref file"));
@@ -311,7 +306,7 @@ void digitalLogFlowRate(int source){
         sprintf(strBuffer, time.toString(strBuffer));
         sprintf(strBuffer, "%s, %d",strBuffer, volume[ind]);
         Serial.println(strBuffer);
-        //fileBuf.println(strBuffer);
+        fileBuf.println(strBuffer);
       }
       fileBuf.close();    
     }    
