@@ -18,13 +18,14 @@ RTC_DS1307 rtc;
 #define inputDT 12
 
 #define STATE (state & 0x0F)
-#define OLDSTATE (state & 0xF0)
+#define SUBSTATE (state & 0xF0)
 
 #define CHANNELS 3
 #define VOLDIGITS 4
 #define REFRESHSTATES 0
 
-int volumeUnit = 100;
+short 
+int volumeUnit[CHANNELS] = {100,100,100};
 //String measureUnit = "l/s";
 int timeUnit = 1000;
 long volume[CHANNELS] = {0};
@@ -41,9 +42,12 @@ char strBuffer[30];
 
 bool recording = false;
 short state = 0;
-//Optimized with bitmask
-//short oldState = -1;
 
+//oldstate is useful only for debugging purposes
+//remove in final version
+//short oldstate = -1;
+
+bool longPress = false;
 unsigned long pressTime = 0;
 
 #define PRESS1 1
@@ -64,7 +68,7 @@ File avgFile;
 short counter = 0; 
 short curStateCLK;
 short prevStateCLK;
-String encdir ="";
+//String encdir ="";
 
 void u8g2_prepare() {
  u8g2.setFont(u8g2_font_6x10_tf);
@@ -78,13 +82,11 @@ void setup() {
   Serial.begin(9600);
 
   //commented reference garbage
-  /*if (!SD.begin(SDPIN)) {
+  if (!SD.begin(SDPIN)) {
     Serial.println(F("initialization failed!"));
     while (1);
   }
   Serial.println(F("SD initialization done."));
-
-  avgFile = SD.open("averages.txt", FILE_WRITE);
 
   /*if (myFile) {
     Serial.print(F("Writing to test.txt..."));
@@ -127,6 +129,8 @@ void setup() {
 
 void loop() {
   curStateCLK =  digitalRead(inputCLK);
+  
+  //function here just for debug purposes; remove once R.E. works;
   readRotaryEnc();
   
   setRecording();
@@ -160,23 +164,29 @@ void digitalLogFlowRate(int source){
     t1 = (float) millis()/timeUnit;
     pressMask += PRESS2;
     
-    volume[source - IMPPIN] += volumeUnit;
-    flow[source - IMPPIN] = (float) volumeUnit / (t1 - t0);
+    volume[source - IMPPIN] += volumeUnit[source - IMPPIN];
+    flow[source - IMPPIN] = (float) volumeUnit[source - IMPPIN] / (t1 - t0);
 
     float tmp = alfa * flow[source - IMPPIN];
-    avgFlow[source - IMPPIN] = (float) ( isinf(tmp) ? 0 : tmp  + (1-alfa)*avgFlow[source - IMPPIN]);
+    avgFlow[source - IMPPIN] = (float) ( isinf(tmp) ? (1-alfa)*avgFlow[source - IMPPIN] : tmp  + (1-alfa)*avgFlow[source - IMPPIN]);
     
     t0 = t1;
 
     //TODO: Save data on SD
+    //(if RAM allows)
+    /*
+    sprintf(strBuffer, "Impulse%d", source - IMPPIN);
+    impulseFile = SD.open(strBuffer, FILE_WRITE);
+    DateTime time = rtc.now();
+    sprintf(strBuffer, "%d", volume);
+    impulseFile.println(time.timestamp(DateTime::TIMESTAMP_FULL) + ", " + strBuffer);
+    impulseFile.close();*/
   }else if(impulso == HIGH && PRESSED2){
     pressMask -= PRESS2;
   }
 }
 
 void setState(){
-  //oldState = state;
-  state = STATE + (STATE << 4);
   int action = digitalRead(SETPIN);
   if (action == LOW  && !PRESSED3){
     pressMask += PRESS3;
@@ -184,26 +194,79 @@ void setState(){
   }else if(action == HIGH && PRESSED3){
     pressMask -= PRESS3;
 
-    if (STATE < CHANNELS)
-      state = (STATE + 1) % CHANNELS + OLDSTATE;
-    else if(STATE > CHANNELS || (STATE == CHANNELS && (millis() - pressTime) < SETTIME))
-      state = (STATE + 1) % (CHANNELS + VOLDIGITS + REFRESHSTATES)+ OLDSTATE;
+    if (!longPress){
+      // used switch instead of if..else to allow for flexibility in case I wanted changes
+      // in respective states. If no changes are made, revert to if..else.
+      switch(STATE){
+        case 0:
+          state = STATE + ((((SUBSTATE >> 4) + 1) % 3) << 4);
+          break;
+        case 1:
+        case 2:
+        case 3:
+          if (((SUBSTATE >> 4) + 1) % (VOLDIGITS + 1) == VOLDIGITS)
+            state = (STATE + 1) % 5;
+          else
+            state = STATE + ((((SUBSTATE >> 4) + 1) % VOLDIGITS) << 4);
+          break;
+        case 4:
+          if (((SUBSTATE >> 4) + 1) % 5 == 4)
+            state = (STATE + 1) % 5;
+          else
+            state = STATE + ((((SUBSTATE >> 4) + 1) % 4) << 4);
+          break;
+  
+        default:
+          state = 0 + ((((SUBSTATE >> 4) + 1) % 3) << 4);
+          break;
+      }
+    }
+    longPress = false;
   }
   if(PRESSED3 && action == LOW && (millis() - pressTime) > SETTIME){
-    state = CHANNELS + OLDSTATE;
+    state = (STATE + 1) % 5;
+    pressTime = millis();
+    longPress = true;
   }
 }
 
 void stateFunctions(){
-  if (STATE != OLDSTATE >> 4){
-    //Serial.println(STATE);
-    //If no function to add here (activation at state change), remove OLDSTATE and simplify state management.    
+  /*
+  if (state != oldstate){
+    Serial.print(F("State: "));
+    Serial.println(STATE);
+    Serial.print(F("Substate: "));
+    Serial.println(SUBSTATE>>4);
   }
-  if (STATE >= CHANNELS){
-      short digits[4] = {volumeUnit / 1000, (volumeUnit % 1000) /100, (volumeUnit % 100) /10, volumeUnit % 10};
-      digits[STATE-CHANNELS] = abs(digits[STATE-CHANNELS] + readRotaryEnc()) % 10;
-      volumeUnit = 1000*digits[0] + 100*digits[1] + 10*digits[2] + digits[3];
-  }
+  oldstate = state;
+  */
+  short digits[4] = {0};
+  switch(STATE){
+      case 1:
+      case 2:
+      case 3:
+        digits[0] = volumeUnit[STATE - 1] / 1000;
+        digits[1] = (volumeUnit[STATE - 1] % 1000) /100;
+        digits[2] = (volumeUnit[STATE - 1] % 100) /10;
+        digits[3] = volumeUnit[STATE - 1] % 10;
+        digits[SUBSTATE>>4] = abs(digits[SUBSTATE>>4] + readRotaryEnc()) % 10;
+        volumeUnit[STATE-1] = 1000*digits[0] + 100*digits[1] + 10*digits[2] + digits[3];
+        break;
+      case 4:
+        digits[0] = refreshRate / 1000;
+        digits[1] = (refreshRate % 1000) /100;
+        digits[2] = (refreshRate % 100) /10;
+        digits[3] = refreshRate % 10;
+        
+        if (digits[0] == 0 && digits[1] == 0 && digits[2] == 0 && SUBSTATE >> 4 == 3)
+          digits[3] = abs(digits[3] - 1 + readRotaryEnc()) % 9 + 1;
+        else
+          digits[SUBSTATE>>4] = abs(digits[SUBSTATE>>4] + readRotaryEnc()) % 10;
+        refreshRate = 1000*digits[0] + 100*digits[1] + 10*digits[2] + digits[3];
+        break;
+      default:
+        break;
+    }
 }
 
 void refreshDisplay(){
@@ -211,37 +274,64 @@ void refreshDisplay(){
   do {
 
     if (recording){
-      u8g2.drawCircle(122, 4, 4);
-      u8g2.drawDisc(122, 4, 2);
+      u8g2.drawCircle(122, 24, 4);
+      u8g2.drawDisc(122, 24, 2);
     }else{
-      u8g2.drawCircle(122, 4, 4);
-    }
-    ("State: " + String(STATE)).toCharArray(strBuffer,10);
-    u8g2.drawStr(64, 0, strBuffer);
-    
-    if (STATE < CHANNELS){
-      //commented garbage
-      /*char str[20];
-      printFloat(flow, str);
-      sprintf(strBuffer, "Flow: %s%s  %s",str, measureUnit);*/
-      
-      ("Flow: " + String(flow[STATE],3)).toCharArray(strBuffer, 20);
-      u8g2.drawStr(0, 10, strBuffer);
-
-      //commented garbage
-      /*char avg[20];
-      printFloat(avgFlow, avg);
-      sprintf(strBuffer, "Average: %s", avg);*/
-      ("Average: " + String(avgFlow[STATE], 3)).toCharArray(strBuffer, 20);
-      u8g2.drawStr(0, 20 , strBuffer);
+      u8g2.drawCircle(122, 24, 4);
     }
 
-    if(STATE >= CHANNELS){
-      sprintf(strBuffer, "Imp: %04d", volumeUnit);
-      //("Imp: " + String(volumeUnit)).toCharArray(strBuffer, 20);
-      u8g2.drawStr(0, 10, strBuffer);
-      //("Imp:").length()*2
-      u8g2.drawStr(6*2+(STATE)*6, 12, "_");
+     switch(STATE){
+      case 0:
+         switch(SUBSTATE>>4){
+          case 0:
+            u8g2.drawStr(84, 0, "Portata");
+            for (short i = 0; i < CHANNELS; i++) {
+              (String(i+1) + ": " + String(flow[i],3)).toCharArray(strBuffer, 15);
+              u8g2.drawStr(0, i*10, strBuffer);
+            }
+            break;            
+          case 1:
+            u8g2.drawStr(84, 0, "Media");
+            for (short i = 0; i < CHANNELS; i++) {
+              (String(i+1) + ": " + String(avgFlow[i],3)).toCharArray(strBuffer, 15);
+              u8g2.drawStr(0, i*10, strBuffer);
+            }
+            break;
+          case 2:
+            u8g2.drawStr(84, 0, "Volume");
+            for (short i = 0; i < CHANNELS; i++) {
+              (String(i+1) + ": " + String(volume[i])).toCharArray(strBuffer, 15);
+              u8g2.drawStr(0, i*10, strBuffer);
+            }
+            break;
+          default:
+            u8g2.drawStr(40, 20, "STATE 0 ERROR!");
+            break;
+        }
+        break;
+      case 1:
+      case 2:
+      case 3:
+        sprintf(strBuffer, "Unita' impulso %d", STATE);
+        //("Unita' impulso "+String(STATE, DEC)).toCharArray(strBuffer, 16);
+        u8g2.drawStr(20, 0, strBuffer);
+
+        sprintf(strBuffer, "%04d", volumeUnit[STATE-1]);
+        u8g2.drawStr(6, 10, strBuffer);
+
+        u8g2.drawStr(6 +(SUBSTATE>>4)*6, 12, "_");       
+        break;
+      case 4:
+        u8g2.drawStr(40, 0, "Refresh rate");
+        
+        sprintf(strBuffer, "Ogni %04d impulsi", refreshRate);
+        u8g2.drawStr(0, 10, strBuffer);
+
+        u8g2.drawStr(30 +(SUBSTATE>>4)*6, 12, "_");       
+        break;
+      default:
+        u8g2.drawStr(40, 20, "STATE OVER ERROR!");
+        break;
     }
   } while ( u8g2.nextPage() );
 }
@@ -253,13 +343,13 @@ short readRotaryEnc(){
      // the encoder is rotating counterclockwise
      if (digitalRead(inputDT) != curStateCLK) { 
        counter --;
-       encdir ="CCW";
+       //encdir ="CCW";
        res = -1;
        
      } else {
        // Encoder is rotating clockwise
        counter ++;
-       encdir ="CW";
+       //encdir ="CW";
        res = 1;
        
      }
@@ -271,16 +361,3 @@ short readRotaryEnc(){
    }
    return res; 
 }
-
-//commented garbage
-/*void printFloat(float num, char* str){
-  float tmpVal = (num < 0) ? -num : num;
-
-  int tmpInt1 = tmpVal;                  // Get the integer (678).
-  float tmpFrac = tmpVal - tmpInt1;      // Get fraction (0.0123).
-  int tmpInt2 = trunc(tmpFrac * 10000);  // Turn into integer (123).
-
-  // Print as parts, note that you need 0-padding for fractional bit.
-
-  sprintf(str, "%s%d.%04d", (num < 0) ? "-" : "", tmpInt1, tmpInt2);
-}*/
