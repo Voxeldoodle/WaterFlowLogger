@@ -12,21 +12,21 @@ Nome 3: P5.csv
 % Unità di volume registrate a ogni impulso
 % Max 3 caratteri per unità (Es. m^3 == 3 caratteri)
 % Lasciare spazio dopo ':' del nome del campo
-VolumeUnit  1: 0.1 m3
-VolumeUnit  2: 0.1 m3
-VolumeUnit  3: 0.1 m3
+VolumeUnit 1: 0.1 m3
+VolumeUnit 2: 0.1 m3
+VolumeUnit 3: 0.1 m3
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Unità di tempo desiderata da visualizzare
 % Opzioni vincolate a 'h', 'm', 's'
 % Lasciare spazio dopo ':' del nome del campo
-TimeUnit   1: h
-TimeUnit   2: h
-TimeUnit   3: h
+TimeUnit 1: h
+TimeUnit 2: h
+TimeUnit 3: h
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Tasso di aggiornamento del valore sul display
-% Il valore indica ogni quanti secondi. 
+% Il valore indica ogni quanti secondi.
 % Decimi e centesimi indicabili come es: 0.5
 % Lasciare spazio dopo ':' del nome del campo
 Refresh rate 1: 2

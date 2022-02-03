@@ -6,17 +6,17 @@
  * - log values on SD at established rate
  * - set a recording date
  * - all preferences read from SD at boot time
- * 
+ *
  * 7.0 update: conversion from impulse rate to time rate
- * 
- * TODO: 
+ *
+ * TODO:
  * - make debug prints cleaner through #define debug
  * - eventually add serial monitor initialization
- * 
+ *
  * Many optimizations are possible, such as using more bitmask and refining
  * some processes, but it's already good enough for the resources available
  * on a Arduino Nano Every, ATMEGA328.
- * 
+ *
  * Last update: 01/2022
  * Author: Antonio Casoli
  */
@@ -117,7 +117,7 @@ short pressMask = 0;
 // Define time interval buffer for a button to
 // make a signal. This is to counteract jiggly and
 // unreliable button presses.
-#define RECBUFFER 1500 //millis to keep REC pressed for signal 
+#define RECBUFFER 1500 //millis to keep REC pressed for signal
 #define SETBUFFER 100 //millis to keep SET pressed for signal
 
 File fileBuf;
@@ -128,16 +128,16 @@ void initAlarm(){
   // Making it so, that the alarm will trigger an interrupt
   pinMode(ALARMPIN, INPUT_PULLUP);
   attachInterrupt(digitalPinToInterrupt(ALARMPIN), recordOnDate, FALLING);
-  
+
   // set alarm 1, 2 flag to false (so alarm 1, 2 didn't happen so far)
   // if not done, this easily leads to problems, as both register aren't reset on reboot/recompile
   rtc.clearAlarm(1);
   rtc.clearAlarm(2);
-  
+
   // stop oscillating signals at SQW Pin
   // otherwise setAlarm1 will fail
   rtc.writeSqwPinMode(DS3231_OFF);
-  
+
   // turn off alarm 2 (in case it isn't off already)
   // again, this isn't done at reboot, so a previously set alarm could easily go overlooked
   rtc.disableAlarm(2);
@@ -148,7 +148,7 @@ void initAlarm(){
   )) {
       Serial.println("Error, alarm wasn't set!");
   }else {
-      Serial.println("Alarm set!");  
+      Serial.println("Alarm set!");
   }
 }
 
@@ -170,7 +170,7 @@ void dispError(char * err1, char * err2){
   }while(set != LOW);
 }
 
-/* 
+/*
  * setDefaults()
  * Dummy function useful to skip parsing from SD
  */
@@ -207,34 +207,36 @@ void parseSettings(){
   String buf;
   short i = 0;
   bool schedRec = false;
-  
+  short j = 0;
+
   // read from the file until there's nothing else in it:
   while (fileBuf.available()) {
     buf = fileBuf.readStringUntil('\n');
     Serial.println(buf);
     //skip commented lines
     if (buf[0] == '%'){
-      continue; 
+      continue;
     }
     buf.toCharArray(strBuffer,40);
-    if(strncmp(strBuffer,"Nome", 4) ==0){
-      i = atoi(&strBuffer[5]);
+    if(strncmp(strBuffer,"Nome", j = strlen("Nome")) ==0){
+
+      i = atoi(&strBuffer[++j]);
       strcpy(logFiles[i-1], &strBuffer[8]);
-      
-    }else if(strncmp(strBuffer,"VolumeUnit", 11) == 0){
-      i = atoi(&strBuffer[12]);
-      
-      short j = 16;
-      volumeUnit[i-1] = atof(&strBuffer[j]);
-      
+
+    }else if(strncmp(strBuffer,"VolumeUnit", strlen("VolumeUnit")) == 0){
+      i = atoi(&strBuffer[++j]);
+
+      j += 2;
+      volumeUnit[i-1] = atof(&strBuffer[j++]);
+
       while(strBuffer[j] != ' '){
         j++;
       }
       strcpy(volUnits[i-1], &strBuffer[++j]);
-      
-    }else if(strncmp(strBuffer,"TimeUnit",10) == 0){
-      i = atoi(&strBuffer[11]);
-      short j = 13;
+
+    }else if(strncmp(strBuffer,"TimeUnit", j = strlen("TimeUnit")) == 0){
+      i = atoi(&strBuffer[++j]);
+      j += 2;
       while(strBuffer[j] != ' '){
         //Serial.println(strBuffer[j]);
         //Serial.println(j);
@@ -256,14 +258,14 @@ void parseSettings(){
       }
       Serial.println(timeUnits[i-1]);
       Serial.println(i);
-      
-    }else if(strncmp(strBuffer,"Refresh rate",12) == 0){
-      i = atoi(&strBuffer[13]);
+
+    }else if(strncmp(strBuffer,"Refresh rate",j=strlen("Refresh rate")) == 0){
+      i = atoi(&strBuffer[++j]);
       refreshRate[i-1] = (int) (atof(&strBuffer[16]) * 1000);
-    }else if(strncmp(strBuffer,"SD log rate",11) == 0){
-      i = atoi(&strBuffer[12]);
+    }else if(strncmp(strBuffer,"SD log rate",+=strlen("SD log rate")) == 0){
+      i = atoi(&strBuffer[++j]);
       sdLogRate[i-1] = (int) (atof(&strBuffer[15])* 1000);
-    }else if(strncmp(strBuffer,"Registrazione Programmata:",26) == 0){
+    }else if(strncmp(strBuffer,"Registrazione Programmata:",strlen("Registrazione Programmata:")) == 0){
       schedRec = strncmp(&strBuffer[27],"ON",2) == 0;
       Serial.println(strncmp(&strBuffer[27],"ON",2));
       Serial.println(&strBuffer[26]);
@@ -330,7 +332,7 @@ void checkVars(bool fileErr){
 }
 
 /*
- * If not present, create 
+ * If not present, create
  * log files with required headers
  */
 void writeHeaders(){
@@ -346,13 +348,13 @@ void writeHeaders(){
         fileBuf.println(strBuffer);
         fileBuf.println("Time, Volume, Portata ist., Portata media");
       }
-      fileBuf.close(); 
+      fileBuf.close();
     }
   }
 }
 
 void setup() {
-  Serial.begin(9600);  
+  Serial.begin(9600);
 
   //Set all pins
   pinMode(RECPIN,INPUT);
@@ -388,7 +390,7 @@ void setup() {
     resetFunc();
   }
   Serial.println(F("SD initialization done."));
-  
+
   //max filename 8 chars + .ext
   fileBuf = SD.open("pref.txt", FILE_READ);
   if (fileBuf) {
@@ -430,7 +432,7 @@ void setRecording(){
   }else if(rec == HIGH && PRESSED4){
     pressMask -= PRESS4;
     longPress[0] = false;
-  }if(PRESSED4 && rec == LOW && (millis() - pressTime[0]) > RECBUFFER){  
+  }if(PRESSED4 && rec == LOW && (millis() - pressTime[0]) > RECBUFFER){
     pressTime[0] = millis();
     longPress[0] = true;
 
@@ -448,7 +450,7 @@ void record(bool activation){
   for (short i = 0; i < CHANNELS; i++) {
     volume[i] = 0;
     flow[i] = 0;
-    lastImp[i] = instant;      
+    lastImp[i] = instant;
   }
 }
 
@@ -458,7 +460,7 @@ void readImpulse(int source){
   if (impulso == LOW  && !(pressMask & (1 << ind))){
     pressMask += 1 << ind;
     impulseMask += 1 << ind;
-    volume[ind] += volumeUnit[ind];    
+    volume[ind] += volumeUnit[ind];
     lastImp[ind] = millis();
   }else if(impulso == HIGH && (pressMask & (1 << ind))){
     pressMask -= 1 << ind;
@@ -474,14 +476,14 @@ void calculateFlow(){
       if (dispRefresh){
         refreshInterval[0] = instant;
         refreshMask += 1 << i;
-      }        
+      }
       if (logRefresfh){
         refreshInterval[1] = instant;
         logMask += 1 << i;
       }
-      
+
       flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(instant-lastImp[i]))/timeUnit);
-      
+
       //Serial.println(logMask & (1 << i));
       if (recording && logMask & (1 << i)){
         fileBuf = SD.open(logFiles[i], FILE_WRITE);
@@ -513,7 +515,7 @@ void setState(){
   }else if(action == HIGH && PRESSED5  && (instant - pressTime[1]) > SETBUFFER){
     pressMask -= PRESS5;
 
-    //avoid changing state if pressing for special function 
+    //avoid changing state if pressing for special function
     if(!longPress[1])
       state = (state + 1) % 3;
     longPress[1] = false;
@@ -525,20 +527,20 @@ void setState(){
       u8x8.clear();
     else
       refreshMask = 1+2+4+8+16+32;
-    
-    
+
+
     pressTime[1] = instant;
     longPress[1] = true;
   }
 }
-  
+
 void refreshDisplay(){
   if (screen){
     //u8x8.setFont(u8x8_font_chroma48medium8_r);
     if (state != oldState || refreshMask){
       if (state != oldState)
         u8x8.clear();
-  
+
       char timeU = 'u';
       switch(state){
         case 0:
@@ -550,12 +552,12 @@ void refreshDisplay(){
               u8x8.setCursor(0,2*i+2);
               double flo = (double) (isinf(flow[i]) ? 0 : flow[i]);
               timeU = timeUnits[i] == 1 ? 's' : (timeUnits[i] == 60 ? 'm' : 'h');
-              //sprintf(strBuffer, "%d: %s %s/%c", i+1, String(flo,2), volUnits[i], timeU); 
+              //sprintf(strBuffer, "%d: %s %s/%c", i+1, String(flo,2), volUnits[i], timeU);
               (String(i+1) + ": " + String(flo,2) + " " + volUnits[i] + "/"+ timeU).toCharArray(strBuffer, 15);
               u8x8.print(strBuffer);
             }
           }
-          break;          
+          break;
         case 1:
           u8x8.drawString(0,0,"Volume");
           for (short i = 0; i < CHANNELS; i++) {
@@ -580,7 +582,7 @@ void refreshDisplay(){
           u8x8.drawString(4,1,"STATE ERROR!");
           break;
       }
-      
+
       refreshMask = 0;
     }
     if (impulseMask){
@@ -590,13 +592,13 @@ void refreshDisplay(){
            u8x8.setCursor(i*3,7);
            u8x8.print(" ---");
            if(instant - lastImp[i] >= IMPVIEWTIME){
-            impulseMask = logMask ^ (logMask & (1 << i));            
+            impulseMask = logMask ^ (logMask & (1 << i));
            }
         }
       }
     }
   }
-  
+
 }
 
 void recordOnDate(){
