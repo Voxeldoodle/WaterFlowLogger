@@ -262,7 +262,7 @@ void parseSettings(){
     }else if(strncmp(strBuffer,"Refresh rate",j=strlen("Refresh rate")) == 0){
       i = atoi(&strBuffer[++j]);
       refreshRate[i-1] = (int) (atof(&strBuffer[16]) * 1000);
-    }else if(strncmp(strBuffer,"SD log rate",+=strlen("SD log rate")) == 0){
+    }else if(strncmp(strBuffer,"SD log rate",j=strlen("SD log rate")) == 0){
       i = atoi(&strBuffer[++j]);
       sdLogRate[i-1] = (int) (atof(&strBuffer[15])* 1000);
     }else if(strncmp(strBuffer,"Registrazione Programmata:",strlen("Registrazione Programmata:")) == 0){
