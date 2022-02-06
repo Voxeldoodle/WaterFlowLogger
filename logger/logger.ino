@@ -223,7 +223,7 @@ void parseSettings(){
       i = atoi(&strBuffer[++j]);
       strcpy(logFiles[i-1], &strBuffer[8]);
 
-    }else if(strncmp(strBuffer,"VolumeUnit", strlen("VolumeUnit")) == 0){
+    }else if(strncmp(strBuffer,"VolumeUnit", j = strlen("VolumeUnit")) == 0){
       i = atoi(&strBuffer[++j]);
 
       j += 2;
