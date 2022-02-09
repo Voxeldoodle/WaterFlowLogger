@@ -10,14 +10,13 @@
  * 7.0 update: conversion from impulse rate to time rate
  *
  * TODO:
- * - make debug prints cleaner through #define debug
  * - eventually add serial monitor initialization
  *
  * Many optimizations are possible, such as using more bitmask and refining
  * some processes, but it's already good enough for the resources available
  * on a Arduino Nano Every, ATMEGA328.
  *
- * Last update: 01/2022
+ * Last update: 02/2022
  * Author: Antonio Casoli
  */
 
@@ -54,17 +53,14 @@ RTC_DS3231 rtc;
 
 #define CHANNELS 3
 
-/*
-//TODO: Change Debug Serial.print with Macro PRINT
 #undef DEBUG
 #define DEBUG 1
 
-#define PRINT(str) {\
-  #ifdef DEBUG \
-    Serial.println(str); \
-  #endif \
-}
-*/
+#ifdef DEBUG
+#define PRINT(message) Serial.println(message);
+#else
+#define PRINT(message)
+#endif
 
 double volumeUnit[CHANNELS] = {-1,-1,-1};
 #define timeUnit 1000
@@ -146,9 +142,9 @@ void initAlarm(){
           recDate,
           DS3231_A1_Date // this mode triggers the alarm when the seconds match. See Doxygen for other options
   )) {
-      Serial.println("Error, alarm wasn't set!");
+      PRINT("Error, alarm wasn't set!")
   }else {
-      Serial.println("Alarm set!");
+      PRINT("Alarm set!")
   }
 }
 
@@ -157,7 +153,7 @@ void initAlarm(){
  * Useful for debugging without USB monitor
  */
 void dispError(char * err1, char * err2){
-  Serial.println(F("Disp Err"));
+  PRINT(F("Disp Err"))
   u8x8.clear();
   //err1.toCharArray(strBuffer,40);
   u8x8.drawString(0,1,err1);
@@ -212,7 +208,7 @@ void parseSettings(){
   // read from the file until there's nothing else in it:
   while (fileBuf.available()) {
     buf = fileBuf.readStringUntil('\n');
-    Serial.println(buf);
+    PRINT(buf)
     //skip commented lines
     if (buf[0] == '%'){
       continue;
@@ -238,8 +234,8 @@ void parseSettings(){
       i = atoi(&strBuffer[++j]);
       j += 2;
       while(strBuffer[j] != ' '){
-        //Serial.println(strBuffer[j]);
-        //Serial.println(j);
+        //PRINT(strBuffer[j])
+        //PRINT(j)
         j++;
       }
       switch(strBuffer[++j]){
@@ -256,8 +252,8 @@ void parseSettings(){
           timeUnits[i-1] = -1;
           break;
       }
-      Serial.println(timeUnits[i-1]);
-      Serial.println(i);
+      PRINT(timeUnits[i-1])
+      PRINT(i)
 
     }else if(strncmp(strBuffer,"Refresh rate",j=strlen("Refresh rate")) == 0){
       i = atoi(&strBuffer[++j]);
@@ -267,17 +263,17 @@ void parseSettings(){
       sdLogRate[i-1] = (int) (atof(&strBuffer[15])* 1000);
     }else if(strncmp(strBuffer,"Registrazione Programmata:",strlen("Registrazione Programmata:")) == 0){
       schedRec = strncmp(&strBuffer[27],"ON",2) == 0;
-      Serial.println(strncmp(&strBuffer[27],"ON",2));
-      Serial.println(&strBuffer[26]);
-      Serial.println(schedRec);
+      PRINT(strncmp(&strBuffer[27],"ON",2))
+      PRINT(&strBuffer[26])
+      PRINT(schedRec)
     }else if(strncmp(strBuffer,"Data&Ora:",9) == 0){
       //DateTime tmp(&strBuffer[10]);
       DateTime dt("2021-10-30T07:50:37");
       recDate = dt;
-      Serial.println(&strBuffer[10]);
+      PRINT(&strBuffer[10])
       strcpy(strBuffer, "DDD, DD MMM YYYY hh:mm:ss");
-      Serial.println(recDate.toString(strBuffer));
-      Serial.println(recDate > rtc.now());
+      PRINT(recDate.toString(strBuffer))
+      PRINT(recDate > rtc.now())
     }
   }
 
@@ -289,7 +285,7 @@ void parseSettings(){
  * Verifier function to avoid illegal initialization
  */
 void checkVars(bool fileErr){
-  Serial.println(F("Checking Vars"));
+  PRINT(F("Checking Vars"))
   if (fileErr){
     u8x8.clear();
     u8x8.drawString(0,1,"Err opening pref");
@@ -300,34 +296,34 @@ void checkVars(bool fileErr){
   }
   for (short i=0; i<CHANNELS; i++){
     if (volumeUnit[i] < 0){
-      Serial.println(volumeUnit[i]);
+      PRINT(volumeUnit[i])
       volumeUnit[i] = 0;
       sprintf(strBuffer, "Volume %d error", i+1);
-      Serial.println(strBuffer);
+      PRINT(strBuffer)
       if (!fileErr)
         dispError(strBuffer, "Default val 0");
     }
     if (timeUnits[i] < 0){
-      Serial.println(timeUnits[i]);
+      PRINT(timeUnits[i])
       timeUnits[i] = 1;
       sprintf(strBuffer, "TimeUnit %d error", i+1);
-      Serial.println(strBuffer);
+      PRINT(strBuffer)
       if (!fileErr)
         dispError(strBuffer, "Default val s");
     }
     if (refreshRate[i] < 0){
-      Serial.println(refreshRate[i]);
+      PRINT(refreshRate[i])
       refreshRate[i] = 1;
       sprintf(strBuffer, "Refresh %d error", i+1);
-      Serial.println(strBuffer);
+      PRINT(strBuffer)
       if (!fileErr)
         dispError(strBuffer, "Default val 1");
     }
-    Serial.println(logFiles[i]);
-    Serial.println(volumeUnit[i]);
-    Serial.println(volUnits[i]);
-    Serial.println(timeUnits[i]);
-    Serial.println(refreshRate[i]);
+    PRINT(logFiles[i])
+    PRINT(volumeUnit[i])
+    PRINT(volUnits[i])
+    PRINT(timeUnits[i])
+    PRINT(refreshRate[i])
   }
 }
 
@@ -340,9 +336,9 @@ void writeHeaders(){
     if (!SD.exists(logFiles[i])){
       fileBuf = SD.open(logFiles[i], FILE_WRITE);
       if (!fileBuf)
-        Serial.println(F("Error in opening file!!"));
+        PRINT(F("Error in opening file!!"))
       else{
-        Serial.println(F("File opened succesfully!!"));
+        PRINT(F("File opened succesfully!!"))
         sprintf(strBuffer, "#Unità espress in %s", volUnits[i]);
         fileBuf.println(logFiles[i]);
         fileBuf.println(strBuffer);
@@ -373,7 +369,7 @@ void setup() {
 
   //Initialize RTC module
   if (!rtc.begin()) {
-    Serial.println(F("Couldn't find RTC"));
+    PRINT(F("Couldn't find RTC"))
     dispError("RTC Error", "Check RTC");
     Serial.flush();
     delay(2);
@@ -384,21 +380,21 @@ void setup() {
   //Initialize SD Lib
   bool fileErr = false;
   if (!SD.begin(SDPIN)) {
-    Serial.println(F("initialization failed!"));
+    PRINT(F("initialization failed!"))
     dispError("SD Error", "Check SD");
     delay(2);
     resetFunc();
   }
-  Serial.println(F("SD initialization done."));
+  PRINT(F("SD initialization done."))
 
   //max filename 8 chars + .ext
   fileBuf = SD.open("pref.txt", FILE_READ);
   if (fileBuf) {
-    Serial.println(F("opened pref"));
+    PRINT(F("opened pref"))
     parseSettings();
   } else {
     // if the file didn't open, print an error:
-    Serial.println(F("error opening pref file"));
+    PRINT(F("error opening pref file"))
     fileErr = true;
   }
   // close the file:
@@ -408,7 +404,7 @@ void setup() {
 
   writeHeaders();
 
-  Serial.println(F("Setup Complete!"));
+  PRINT(F("Setup Complete!"))
 }
 
 void loop() {
@@ -428,7 +424,7 @@ void setRecording(){
   if (rec == LOW  && !PRESSED4){
     pressMask += PRESS4;
     pressTime[0] = millis();
-    Serial.println(F("Pressed1"));
+    PRINT(F("Pressed1"))
   }else if(rec == HIGH && PRESSED4){
     pressMask -= PRESS4;
     longPress[0] = false;
@@ -445,7 +441,7 @@ void record(bool activation){
   recording = !activation;
   digitalWrite(LEDPIN, activation);
   digitalWrite(LED_BUILTIN, activation);
-  Serial.println(activation ? "Recording: ON" : "Recording: OFF");
+  PRINT(activation ? "Recording: ON" : "Recording: OFF")
   unsigned long instant = millis();
   for (short i = 0; i < CHANNELS; i++) {
     volume[i] = 0;
@@ -459,7 +455,7 @@ void readImpulse(int source){
   short ind = IMPPIN1 - source;
   if (impulso == LOW  && !(pressMask & (1 << ind))){
     pressMask += 1 << ind;
-    impulseMask += 1 << ind;
+    impulseMask |= 1 << ind;
     volume[ind] += volumeUnit[ind];
     lastImp[ind] = millis();
   }else if(impulso == HIGH && (pressMask & (1 << ind))){
@@ -482,25 +478,29 @@ void calculateFlow(){
         logMask += 1 << i;
       }
 
-      flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(instant-lastImp[i]))/timeUnit);
+      if(lastImp[i]>0){
+        flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(instant-lastImp[i]))/timeUnit);
+      }else{
+        flow[i] = 0;
+      }
 
-      //Serial.println(logMask & (1 << i));
+      //PRINT(logMask & (1 << i))
       if (recording && logMask & (1 << i)){
         fileBuf = SD.open(logFiles[i], FILE_WRITE);
         if (!fileBuf)
-          Serial.println(F("Error in opening file!!"));
+          PRINT(F("Error in opening file!!"))
         else{
-          Serial.println(F("File opened succesfully!!"));
+          PRINT(F("File opened succesfully!!"))
           DateTime time = rtc.now();
           sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
           sprintf(strBuffer, time.toString(strBuffer));
           sprintf(strBuffer, "%s, %.02f, %.02f",strBuffer, volume[i], flow[i]);
-          Serial.println(strBuffer);
+          PRINT(strBuffer)
           fileBuf.println(strBuffer);
         }
         fileBuf.close();
         logMask = logMask ^ (logMask & (1 << i));
-        //Serial.println(logMask & (1 << i));
+        //PRINT(logMask & (1 << i))
       }
     }
   }
@@ -572,11 +572,15 @@ void refreshDisplay(){
         case 2:
           u8x8.drawString(0,0,"Time");
           DateTime nowTime = rtc.now();
-          DateTime time = rtc.now();
-          sprintf(strBuffer, time.toString("DD-MM-YYYY"));
+//          PRINT(nowTime.unixtime())
+          sprintf(strBuffer, "DD-MM-YYYY");
+          sprintf(strBuffer, nowTime.toString(strBuffer));
+//          sprintf(strBuffer,"%hhu-%hhu-%hu" , nowTime.day(), nowTime.month(), nowTime.year());
           u8x8.drawString(2,3,strBuffer);
-          sprintf(strBuffer, time.toString("hh:mm"));
+          sprintf(strBuffer, "hh:mm");
+          sprintf(strBuffer, nowTime.toString(strBuffer));
           u8x8.drawString(5,5,strBuffer);
+          break;
         default:
           //u8x8.setCursor(4,1);
           u8x8.drawString(4,1,"STATE ERROR!");
@@ -589,22 +593,23 @@ void refreshDisplay(){
       unsigned long instant = millis();
       for (short i = 0; i < CHANNELS; i++) {
         if (impulseMask & (1<<i)){
-           u8x8.setCursor(i*3,7);
-           u8x8.print(" ---");
-           if(instant - lastImp[i] >= IMPVIEWTIME){
-            impulseMask = logMask ^ (logMask & (1 << i));
-           }
+          u8x8.setCursor(i*4,7);
+          u8x8.print(" ***");
+          if(instant - lastImp[i] >= IMPVIEWTIME){
+            impulseMask ^= impulseMask & (1 << i);
+            u8x8.setCursor(i*4,7);
+            u8x8.print("    ");
+          }
         }
       }
     }
   }
-
 }
 
 void recordOnDate(){
   record(true);
   if(rtc.alarmFired(1)) {
     rtc.clearAlarm(1);
-    Serial.println("Alarm cleared");
+    PRINT("Alarm cleared")
   }
 }
