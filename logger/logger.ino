@@ -66,7 +66,7 @@ double volumeUnit[CHANNELS] = {-1,-1,-1};
 #define timeUnit 1000
 double volume[CHANNELS] = {0};
 float flow[CHANNELS] = {0};
-unsigned long lastImp[CHANNELS] = {0};
+unsigned long lastImp[2*CHANNELS] = {0};
 
 char volUnits[CHANNELS][4];
 int timeUnits[CHANNELS] = {-1,-1,-1};
@@ -75,7 +75,7 @@ char logFiles[CHANNELS][12];
 int refreshRate[CHANNELS] = {-1,-1,-1};
 int sdLogRate[CHANNELS] = {-1,-1,-1};
 short refreshMask = 0;
-short impulseMask = 0;
+short dispImpulseMask = 0;
 short logMask = 0;
 unsigned long refreshInterval[2] = {0};
 
@@ -349,6 +349,16 @@ void writeHeaders(){
   }
 }
 
+/*
+ * Special initialization for some variables
+ */
+void initVars(){
+  for (short i = 0; i < CHANNELS; i++) {
+    lastImp[i] = 0;
+    lastImp[i+CHANNELS] = 1;
+  }
+}
+
 void setup() {
   Serial.begin(9600);
 
@@ -386,6 +396,8 @@ void setup() {
     resetFunc();
   }
   PRINT(F("SD initialization done."))
+
+  initVars();
 
   //max filename 8 chars + .ext
   fileBuf = SD.open("pref.txt", FILE_READ);
@@ -455,7 +467,7 @@ void readImpulse(int source){
   short ind = IMPPIN1 - source;
   if (impulso == LOW  && !(pressMask & (1 << ind))){
     pressMask += 1 << ind;
-    impulseMask |= 1 << ind;
+    dispImpulseMask |= 1 << ind;
     volume[ind] += volumeUnit[ind];
     lastImp[ind] = millis();
   }else if(impulso == HIGH && (pressMask & (1 << ind))){
@@ -468,7 +480,7 @@ void calculateFlow(){
   for (short i = 0; i < CHANNELS; i++) {
     bool dispRefresh = instant - refreshInterval[0] >= refreshRate[i];
     bool logRefresfh = instant - refreshInterval[1] >= sdLogRate[i];
-    if(dispRefresh || logRefresfh){
+    if(lastImp[i] != lastImp[i+CHANNELS] || dispRefresh || logRefresfh){
       if (dispRefresh){
         refreshInterval[0] = instant;
         refreshMask += 1 << i;
@@ -478,7 +490,10 @@ void calculateFlow(){
         logMask += 1 << i;
       }
 
-      if(lastImp[i]>0){
+      if (lastImp[i] > lastImp[i+CHANNELS]) {
+        flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(lastImp[i]-lastImp[i+CHANNELS]))/timeUnit);
+        lastImp[i+CHANNELS] = lastImp[i];
+      }else if(lastImp[i] == lastImp[i+CHANNELS]){
         flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(instant-lastImp[i]))/timeUnit);
       }else{
         flow[i] = 0;
@@ -589,14 +604,14 @@ void refreshDisplay(){
 
       refreshMask = 0;
     }
-    if (impulseMask){
+    if (dispImpulseMask){
       unsigned long instant = millis();
       for (short i = 0; i < CHANNELS; i++) {
-        if (impulseMask & (1<<i)){
+        if (dispImpulseMask & (1<<i)){
           u8x8.setCursor(i*4,7);
           u8x8.print(" ***");
           if(instant - lastImp[i] >= IMPVIEWTIME){
-            impulseMask ^= impulseMask & (1 << i);
+            dispImpulseMask ^= dispImpulseMask & (1 << i);
             u8x8.setCursor(i*4,7);
             u8x8.print("    ");
           }
