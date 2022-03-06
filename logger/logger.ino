@@ -355,7 +355,7 @@ void writeHeaders(){
 void initVars(){
   for (short i = 0; i < CHANNELS; i++) {
     lastImp[i] = 0;
-    lastImp[i+CHANNELS] = 1;
+    lastImp[i+CHANNELS] = 0;
   }
 }
 
@@ -469,6 +469,7 @@ void readImpulse(int source){
     pressMask += 1 << ind;
     dispImpulseMask |= 1 << ind;
     volume[ind] += volumeUnit[ind];
+    lastImp[ind+CHANNELS] = lastImp[ind];
     lastImp[ind] = millis();
   }else if(impulso == HIGH && (pressMask & (1 << ind))){
     pressMask -= 1 << ind;
@@ -490,10 +491,11 @@ void calculateFlow(){
         logMask += 1 << i;
       }
 
-      if (lastImp[i] > lastImp[i+CHANNELS]) {
+      unsigned long interval = lastImp[i]-lastImp[i+CHANNELS];
+
+      if (lastImp[i] > 0 && instant - lastImp[i] < interval) {
         flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(lastImp[i]-lastImp[i+CHANNELS]))/timeUnit);
-        lastImp[i+CHANNELS] = lastImp[i];
-      }else if(lastImp[i] == lastImp[i+CHANNELS]){
+      }else if(lastImp[i] > 0 && instant - lastImp[i] >= interval){
         flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(instant-lastImp[i]))/timeUnit);
       }else{
         flow[i] = 0;
