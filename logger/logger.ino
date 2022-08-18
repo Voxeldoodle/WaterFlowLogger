@@ -69,6 +69,7 @@ float flow[CHANNELS] = {0};
 unsigned long lastImp[2*CHANNELS] = {0};
 
 char volUnits[CHANNELS][4];
+char timeUnitChar[CHANNELS][4];
 int timeUnits[CHANNELS] = {-1,-1,-1};
 char logFiles[CHANNELS][12];
 
@@ -217,7 +218,10 @@ void parseSettings(){
     if(strncmp(strBuffer,"Nome", j = strlen("Nome")) ==0){
 
       i = atoi(&strBuffer[++j]);
-      strcpy(logFiles[i-1], &strBuffer[8]);
+      // TODO: Check why strcpy not working??
+      //strcpy(logFiles[i-1], &strBuffer[8]);
+      //Override in caso di errore
+      sprintf(logFiles[i-1], "P%d.csv", i);
 
     }else if(strncmp(strBuffer,"VolumeUnit", j = strlen("VolumeUnit")) == 0){
       i = atoi(&strBuffer[++j]);
@@ -252,6 +256,7 @@ void parseSettings(){
           timeUnits[i-1] = -1;
           break;
       }
+      strcpy(timeUnitChar[i-1], &strBuffer[j]);
       PRINT(timeUnits[i-1])
       PRINT(i)
 
@@ -339,10 +344,11 @@ void writeHeaders(){
         PRINT(F("Error in opening file!!"))
       else{
         PRINT(F("File opened succesfully!!"))
-        sprintf(strBuffer, "#Unità espress in %s", volUnits[i]);
+        // TODO: Check strange newline for both arrays
+        sprintf(strBuffer, "#Unità espresse in %s e %s", volUnits[i], timeUnitChar[i]);
         fileBuf.println(logFiles[i]);
         fileBuf.println(strBuffer);
-        fileBuf.println("Time, Volume, Portata ist., Portata media");
+        fileBuf.println("Time, Volume, Portata ist.");
       }
       fileBuf.close();
     }
@@ -386,6 +392,7 @@ void setup() {
     resetFunc();
   }
   rtc.disable32K();
+  rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
 
   //Initialize SD Lib
   bool fileErr = false;
@@ -450,7 +457,6 @@ void setRecording(){
 }
 
 void record(bool activation){
-  recording = !activation;
   digitalWrite(LEDPIN, activation);
   digitalWrite(LED_BUILTIN, activation);
   PRINT(activation ? "Recording: ON" : "Recording: OFF")
@@ -494,7 +500,7 @@ void calculateFlow(){
       unsigned long interval = lastImp[i]-lastImp[i+CHANNELS];
 
       if (lastImp[i] > 0 && instant - lastImp[i] < interval) {
-        flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(lastImp[i]-lastImp[i+CHANNELS]))/timeUnit);
+        flow[i] = volumeUnit[i] * timeUnits[i] / (((float)interval)/timeUnit);
       }else if(lastImp[i] > 0 && instant - lastImp[i] >= interval){
         flow[i] = volumeUnit[i] * timeUnits[i] / (((float)(instant-lastImp[i]))/timeUnit);
       }else{
@@ -511,11 +517,11 @@ void calculateFlow(){
           DateTime time = rtc.now();
           sprintf(strBuffer, "YYYY-MM-DD hh:mm:ss");
           sprintf(strBuffer, time.toString(strBuffer));
-          sprintf(strBuffer, "%s, %.02f, %.02f",strBuffer, volume[i], flow[i]);
-          PRINT(strBuffer)
+          sprintf(strBuffer, "%s, %.2f, %.2f",strBuffer, volume[i], flow[i]);
           fileBuf.println(strBuffer);
         }
         fileBuf.close();
+        PRINT(strBuffer)
         logMask = logMask ^ (logMask & (1 << i));
         //PRINT(logMask & (1 << i))
       }
